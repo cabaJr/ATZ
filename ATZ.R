@@ -1,11 +1,19 @@
 #### VX ####
 
+# features To add
+# 1. plotly to be used in age scatterplot, displaying AnimalID, CageID, 
+#    possibly highlighting the points of other animals caged together
+# 2. possibility to highlight cells in tables and copy selection (to be pasted in Atune or else)
+# 2.5 when highlighting rows in cage table, highlight the animals in the age scatterplot.
+# 3. additional barplot that differentiates between animals in breeding and not, + Sex and Strain
+
 library(shiny)
 library(dplyr)
 library(ggplot2)
 library(DT)
 library(lubridate)
 library(plotly)
+library(RColorBrewer)
 
 # Define UI
 ui <- fluidPage(
@@ -19,12 +27,12 @@ ui <- fluidPage(
     mainPanel(
       tabsetPanel(
         tabPanel("Pie Chart", plotOutput("pie")),
-        tabPanel("Bar Plot", plotOutput("plot")),
+        tabPanel("Bar Plot", plotOutput("plot"), plotOutput("plot2")),
         tabPanel("Table", DT::dataTableOutput("table")),
         tabPanel("Age Table", DT::dataTableOutput("age_table")),
-        tabPanel("Age Scatterplot", plotOutput("scatterplot", height = "900px")),
+        tabPanel("Age Scatterplot", plotlyOutput("scatterplot", height = "900px")),
         tabPanel("Cage Table", DT::dataTableOutput("cage_table"), DT::dataTableOutput("cage_summary_table")),
-        tabPanel("Cage Bar Plot", plotOutput("barplot_cage")),
+        tabPanel("Cage Bar Plot", plotOutput("barplot_cage"))
       )
     )
   )
@@ -38,14 +46,17 @@ server <- function(input, output) {
     req(input$file)
     ext <- tools::file_ext(input$file$datapath)
     if(ext == "csv") {
-      df <- read.csv(input$file$datapath, sep = ",", header = TRUE)
+      df <- read.csv(input$file$datapath, sep = ";", header = TRUE)
     } else if(ext == "xlsx") {
       df <- readxl::read_xlsx(input$file$datapath, sheet = 1)
       df <- as.data.frame(df)
     }
+    print(class(df))
     colnames(df) <- c('IsDead', 'IsReservedByOrder', 'ParticipatesInActiveMating', 'IsReservedByReservation', 'IsLitter', 'IsWeaned', 'IsSick', 'HasTask', 'NotesExist', 'AttachmentExists', 'LockedForExperiment', 'IsPreviouslyUsed', 'CageID', 'AnimalID', 'No. of animals', 'S', 'Species', 'DoB', 'Exit date', 'Age', 'Strain', 'Genotype', 'Room', 'Team', 'PPL', 'Responsible User', 'Project code', 'Status', 'protocol', 'Sire', 'Dam', 'Date of delivery', 'Tags', 'Last Study plan')
     return(df)
   })
+  
+  
   
   ## Generate all tables
   
@@ -60,12 +71,12 @@ server <- function(input, output) {
   # Generate summary table
   summary_table <- reactive({
     data() %>%
-      group_by(Strain, S) %>%
+      group_by(Strain, S, ParticipatesInActiveMating) %>%
       summarize(count = n())
   })
   
-  # Generate summary table for cages
-  summary_table <- reactive({
+  # Generate summary table0
+  summary_table0 <- reactive({
     data() %>%
       group_by(Strain, S) %>%
       summarize(count = n())
@@ -75,7 +86,7 @@ server <- function(input, output) {
   cage_table <- reactive({
     cage <- age_data() %>%
       group_by(CageID) %>%
-      summarize(n = n_distinct(AnimalID),
+      summarize(n = dplyr::n_distinct(AnimalID),
                 prevalent_strain = ifelse(sum(Strain == "C57BL/6J") == n(), "C57BL/6J",
                                           unique(na.omit(Strain[Strain != "C57BL/6J"]))),
                 participates_in_mating = ifelse(all(ParticipatesInActiveMating), "Yes", "No"))
@@ -90,6 +101,17 @@ server <- function(input, output) {
       distinct(CageID, .keep_all = TRUE) %>%
       group_by(prevalent_strain, participates_in_mating) %>%
       summarize(n_cages = n())
+  })
+  cage_sumDTable <- reactive({
+    # create DT table
+    datatable(cage_summary_table(), options = list(
+      pageLength = 5,
+      initComplete = JS(
+        "function(settings, json) {",
+        "  $(this.api().table().header()).css({'background-color': '#f0f0f0', 'font-weight': 'bold'});",
+        "}"
+      )
+    ), selection = "single")
   })
   
   ## Generate all plots
@@ -112,21 +134,67 @@ server <- function(input, output) {
   
   # Render bar plot
   output$plot <- renderPlot({
-    ggplot(summary_table(), aes(x = Strain, y = count, fill = S)) +
+    ggplot(summary_table0(), aes(x = Strain, y = count, fill = S)) +
       ggtitle(label = "Animal per strain", subtitle = "grouped by Strain and Sex")+
       geom_bar(stat = "identity", position = "dodge") +
       theme_bw()
   })
   
+  # Render bar plot mating 
+  output$plot2 <- renderPlot({
+    ggplot(summary_table(), aes(x = S, y = count, fill = S, alpha = ParticipatesInActiveMating, )) +
+      ggtitle(label = "Animal per strain", subtitle = "grouped by Strain, Sex, and animals in breeding")+
+      geom_bar(stat = "identity", position = "stack") +
+      scale_fill_manual(values = c("#E21A1C", "#339F2D", "#2078B4"), #c("red", "green","blue"), 
+                        name = "Sex",
+                        labels = c("F", "M", "u")) +
+      scale_alpha_manual(values = c(0.5, 1), 
+                         name = "Participates in Active Mating",
+                         labels = c("No", "Yes")) +
+      facet_grid(. ~ Strain) +
+      theme_bw()
+  })
+  
   # Render scatterplot
-  output$scatterplot <- renderPlot({
-    ggplot(age_data(), aes(x = Strain, y = Age, color = S)) +
+  output$scatterplot <- renderPlotly({
+    p <- ggplot(age_data(), 
+                aes(x = Strain, y = Age, color = S, 
+                    text = paste("Animal ID: ", AnimalID, "<br>Cage ID: ", CageID, "<br>Mating: ", ParticipatesInActiveMating))) +
       geom_point(position = position_jitter(width = 0.33, height = 2.5), size = 3) +
       geom_hline(yintercept = 365, color = "red", size = 1.5) +
-      theme(aspect.ratio = 3)+
-      theme_bw()+
+      theme(aspect.ratio = 3) +
+      theme_bw() +
       scale_y_continuous(breaks = seq(0, max(age_data()$Age), by = 30))
+    
+    ggplotly(p, tooltip = c("text")) %>% 
+      layout(yaxis = list(title = "Age"))
   })
+  
+  # action on scatterplot
+  
+  # observe selected data in DT and update plotly object
+  # observeEvent(input$table_rows_selected, {
+  #   selected_rows <- input$table_rows_selected
+  #   if (length(selected_rows) > 0) {
+  #     fig_data <- list(
+  #       x = df$x[selected_rows],
+  #       y = df$y[selected_rows],
+  #       type = "scatter",
+  #       mode = "markers",
+  #       marker = list(size = 10, color = "red")
+  #     )
+  #   } else {
+  #     fig_data <- list(
+  #       x = df$x,
+  #       y = df$y,
+  #       type = "scatter",
+  #       mode = "markers"
+  #     )
+  #   }
+  #   plotlyProxyInvoke(p, "deleteTraces", 0)
+  #   plotlyProxyInvoke(p, "addTraces", fig_data)
+  # })
+  
   
   # Render cage_plot
   
@@ -158,7 +226,7 @@ server <- function(input, output) {
   output$cage_table <- DT::renderDT({
     cage_table()
   })
-
+  
   # Render Cage summary Table
   output$cage_summary_table <- DT::renderDT({
     cage_summary_table()
@@ -171,4 +239,3 @@ shinyApp(ui, server)
 
 
 #### ####
-
