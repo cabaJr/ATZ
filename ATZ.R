@@ -46,7 +46,7 @@ server <- function(input, output) {
     req(input$file)
     ext <- tools::file_ext(input$file$datapath)
     if(ext == "csv") {
-      df <- read.csv(input$file$datapath, sep = ";", header = TRUE)
+      df <- read.csv(input$file$datapath, sep = ",", header = TRUE)
     } else if(ext == "xlsx") {
       df <- readxl::read_xlsx(input$file$datapath, sheet = 1)
       df <- as.data.frame(df)
@@ -142,7 +142,7 @@ server <- function(input, output) {
   
   # Render bar plot mating 
   output$plot2 <- renderPlot({
-    ggplot(summary_table(), aes(x = S, y = count, fill = S, alpha = ParticipatesInActiveMating, )) +
+    ggplot(summary_table(), aes(x = S, y = count, fill = S, alpha = ParticipatesInActiveMating)) +
       ggtitle(label = "Animal per strain", subtitle = "grouped by Strain, Sex, and animals in breeding")+
       geom_bar(stat = "identity", position = "stack") +
       scale_fill_manual(values = c("#E21A1C", "#339F2D", "#2078B4"), #c("red", "green","blue"), 
@@ -158,12 +158,14 @@ server <- function(input, output) {
   # Render scatterplot
   output$scatterplot <- renderPlotly({
     p <- ggplot(age_data(), 
-                aes(x = Strain, y = Age, color = S, 
+                aes(x = Strain, y = Age, fill = S, color = ParticipatesInActiveMating,
                     text = paste("Animal ID: ", AnimalID, "<br>Cage ID: ", CageID, "<br>Mating: ", ParticipatesInActiveMating))) +
-      geom_point(position = position_jitter(width = 0.33, height = 2.5), size = 3) +
-      geom_hline(yintercept = 365, color = "red", size = 1.5) +
-      theme(aspect.ratio = 3) +
-      theme_bw() +
+      geom_point(position = position_jitter(width = 0.33, height = 2.5), 
+                 size = 3, alpha = 0.75, show.legend = FALSE) +
+      scale_color_manual(values = c("TRUE" = "black"))+
+      geom_hline(yintercept = 365, color = "red", linewidth = 1.5) +
+      geom_hline(yintercept = 15, color = "yellow", linewidth = 1, linetype = "dashed") +
+      theme(aspect.ratio = 3, legend.position="none", axis.text.x = element_text(angle = 30, vjust = 0.5, hjust=1)) +
       scale_y_continuous(breaks = seq(0, max(age_data()$Age), by = 30))
     
     ggplotly(p, tooltip = c("text")) %>% 
@@ -236,6 +238,3 @@ server <- function(input, output) {
 
 # Run the app
 shinyApp(ui, server)
-
-
-#### ####
