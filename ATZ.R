@@ -15,13 +15,15 @@ library(lubridate)
 library(plotly)
 library(RColorBrewer)
 
+# version valid for data extracted after 27/06/2023
+
 # Define UI
 ui <- fluidPage(
   titlePanel("Animal Study Summary"),
   sidebarLayout(
     sidebarPanel(
       fileInput("file", "Choose CSV file",
-                accept = c(".csv")),
+                accept = c(".csv", ".xlsx")),
       actionButton("update", "Update")
     ),
     mainPanel(
@@ -30,7 +32,7 @@ ui <- fluidPage(
         tabPanel("Bar Plot", plotOutput("plot"), plotOutput("plot2")),
         tabPanel("Table", DT::dataTableOutput("table")),
         tabPanel("Age Table", DT::dataTableOutput("age_table")),
-        tabPanel("Age Scatterplot", plotlyOutput("scatterplot", height = "900px")),
+        tabPanel("Age Scatterplot", plotlyOutput("scatterplot", height = "750px")),
         tabPanel("Cage Table", DT::dataTableOutput("cage_table"), DT::dataTableOutput("cage_summary_table")),
         tabPanel("Cage Bar Plot", plotOutput("barplot_cage"))
       )
@@ -47,26 +49,22 @@ server <- function(input, output) {
     ext <- tools::file_ext(input$file$datapath)
     if(ext == "csv") {
       df <- read.csv(input$file$datapath, sep = ",", header = TRUE)
+      colnames(df) <- c('IsDead', 'IsReservedByOrder', 'ParticipatesInActiveMating', 'IsReservedByReservation', 'IsLitter', 'IsWeaned', 'IsSick', 'HasTask', 'NotesExist', 'AttachmentExists', 'LockedForExperiment', 'IsPreviouslyUsed', 'IsLockedForEdit', 'HasHealthConcern', 'CageID', 'AnimalID', 'No. of animals', 'S', 'Species', 'DoB', 'Exit date', 'Age', 'Strain', 'Genotype', 'Room', 'Team', 'PPL', 'Responsible User', 'Project code', 'Status', 'protocol', 'Sire', 'Dam', 'Date of delivery', 'Tags', 'Last Study plan')
+      df <- df %>%
+        select(Strain, S, AnimalID, Sire, CageID, DoB, ParticipatesInActiveMating) %>%
+        mutate(Age = as.numeric(difftime(Sys.Date(), dmy(DoB), units = "days")))
     } else if(ext == "xlsx") {
       df <- readxl::read_xlsx(input$file$datapath, sheet = 1)
       df <- as.data.frame(df)
+      colnames(df) <- c('IsDead', 'IsReservedByOrder', 'ParticipatesInActiveMating', 'IsReservedByReservation', 'IsLitter', 'IsWeaned', 'IsSick', 'HasTask', 'NotesExist', 'AttachmentExists', 'LockedForExperiment', 'IsPreviouslyUsed', 'IsLockedForEdit', 'HasHealthConcern', 'CageID', 'AnimalID', 'No. of animals', 'S', 'Species', 'DoB', 'Exit date', 'Age', 'Strain', 'Genotype', 'Room', 'Team', 'PPL', 'Responsible User', 'Project code', 'Status', 'protocol', 'Sire', 'Dam', 'Date of delivery', 'Tags', 'Last Study plan')
+      df <- df %>%
+        select(Strain, S, AnimalID, Sire, CageID, DoB, ParticipatesInActiveMating) %>%
+        mutate(Age = as.numeric(difftime(Sys.Date(), ymd(DoB), units = "days")))
     }
     print(class(df))
-    colnames(df) <- c('IsDead', 'IsReservedByOrder', 'ParticipatesInActiveMating', 'IsReservedByReservation', 'IsLitter', 'IsWeaned', 'IsSick', 'HasTask', 'NotesExist', 'AttachmentExists', 'LockedForExperiment', 'IsPreviouslyUsed', 'CageID', 'AnimalID', 'No. of animals', 'S', 'Species', 'DoB', 'Exit date', 'Age', 'Strain', 'Genotype', 'Room', 'Team', 'PPL', 'Responsible User', 'Project code', 'Status', 'protocol', 'Sire', 'Dam', 'Date of delivery', 'Tags', 'Last Study plan')
     return(df)
   })
-  
-  
-  
-  ## Generate all tables
-  
-  # Extract relevant columns for age table
-  age_data <- reactive({
-    data() %>%
-      select(Strain, S, AnimalID, Sire, CageID, DoB, ParticipatesInActiveMating) %>%
-      mutate(Age = as.numeric(difftime(Sys.Date(), dmy(DoB), units = "days")))
-    # Age to be moved to third place in col order
-  })
+
   
   # Generate summary table
   summary_table <- reactive({
@@ -84,12 +82,12 @@ server <- function(input, output) {
   
   # Generate table of prevalent Strain for each unique CageID value
   cage_table <- reactive({
-    cage <- age_data() %>%
+    cage <- data() %>%
       group_by(CageID) %>%
       summarize(n = dplyr::n_distinct(AnimalID),
                 prevalent_strain = ifelse(sum(Strain == "C57BL/6J") == n(), "C57BL/6J",
                                           unique(na.omit(Strain[Strain != "C57BL/6J"]))),
-                participates_in_mating = ifelse(all(ParticipatesInActiveMating), "Yes", "No"))
+                participates_in_mating = ifelse(any(ParticipatesInActiveMating), "Yes", "No"))
     
   })
   
@@ -157,16 +155,19 @@ server <- function(input, output) {
   
   # Render scatterplot
   output$scatterplot <- renderPlotly({
-    p <- ggplot(age_data(), 
+    p <- ggplot(data(), 
                 aes(x = Strain, y = Age, fill = S, color = ParticipatesInActiveMating,
-                    text = paste("Animal ID: ", AnimalID, "<br>Cage ID: ", CageID, "<br>Mating: ", ParticipatesInActiveMating))) +
+                    text = paste("Animal ID: ", AnimalID,
+                                 "<br>Cage ID: ", CageID,
+                                 "<br>Mating: ", ParticipatesInActiveMating,
+                                 "<br>Sire: ", Sire))) +
       geom_point(position = position_jitter(width = 0.33, height = 2.5), 
                  size = 3, alpha = 0.75, show.legend = FALSE) +
       scale_color_manual(values = c("TRUE" = "black"))+
       geom_hline(yintercept = 365, color = "red", linewidth = 1.5) +
       geom_hline(yintercept = 15, color = "yellow", linewidth = 1, linetype = "dashed") +
       theme(aspect.ratio = 3, legend.position="none", axis.text.x = element_text(angle = 30, vjust = 0.5, hjust=1)) +
-      scale_y_continuous(breaks = seq(0, max(age_data()$Age), by = 30))
+      scale_y_continuous(breaks = seq(0, max(data()$Age), by = 30))
     
     ggplotly(p, tooltip = c("text")) %>% 
       layout(yaxis = list(title = "Age"))
@@ -206,7 +207,7 @@ server <- function(input, output) {
       xlab("Strain") +
       ylab("Number of Cages") +
       ggtitle("Number of Cages per Strain") +
-      scale_y_continuous(breaks = seq(0, max(age_data()$Age), by = 2))+
+      scale_y_continuous(breaks = seq(0, max(data()$Age), by = 2))+
       scale_fill_manual(values = c("steelblue", "red"), 
                         name = "Mating Status", 
                         labels = c("No", "Yes")) 
@@ -221,7 +222,7 @@ server <- function(input, output) {
   
   # Render Age DataTable
   output$age_table <- DT::renderDT({
-    age_data()
+    data()
   })
   
   # Render Cage Table
