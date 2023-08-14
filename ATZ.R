@@ -22,7 +22,7 @@ ui <- fluidPage(
   titlePanel("Animal Study Summary"),
   sidebarLayout(
     sidebarPanel(
-      fileInput("file", "Choose CSV file",
+      fileInput("file", "Choose CSV or XLSX file",
                 accept = c(".csv", ".xlsx")),
       actionButton("update", "Update")
     ),
